@@ -1,6 +1,8 @@
 interface WebhookData {
     id: string
     serviceId: string
+    serviceName?: string
+    status?: "succeeded" | "failed" | "canceled"
 }
 
 export interface WebhookPayload {
@@ -10,6 +12,12 @@ export interface WebhookPayload {
 }
 
 export interface RenderService {
+    id: string
+    name: string
+    dashboardUrl: string
+}
+
+export interface RenderPostgres {
     id: string
     name: string
     dashboardUrl: string
