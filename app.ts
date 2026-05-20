@@ -94,150 +94,173 @@ function validateWebhook(req: Request) {
     wh.verify(req.body, headers);
 }
 
-const COLOR_INFO = "#5865F2"
-const COLOR_SUCCESS = "#57F287"
-const COLOR_FAILURE = "#FF5C88"
-const COLOR_WARNING = "#FAA61A"
-const COLOR_NEUTRAL = "#99AAB5"
-const COLOR_SUSPENDED = "#992D22"
+const COLOR_GREEN = "#57F287"
+const COLOR_RED = "#ED4245"
+const COLOR_YELLOW = "#FEE75C"
 
-async function handleWebhook(payload: WebhookPayload) {
-    try {
-        switch (payload.type) {
-            case "deploy_started": {
-                const service = await fetchServiceInfo(payload)
-                console.log(`sending discord message for ${service.name} (deploy_started)`)
-                await sendNotification({
-                    name: service.name,
-                    dashboardUrl: service.dashboardUrl,
-                    color: COLOR_INFO,
-                    titleSuffix: "Deploy Started",
-                    description: "Deployment in progress.",
-                    showLogsButton: true,
-                })
-                return
+interface EventStyle {
+    color: string;
+    emoji: string;
+    title: string;
+    summary: string;
+    showLogsButton?: boolean;
+}
+
+type EmbedField = {name: string; value: string; inline?: boolean}
+
+function getEventStyle(payload: WebhookPayload): EventStyle | null {
+    switch (payload.type) {
+        case "deploy_started":
+            return {
+                color: COLOR_YELLOW,
+                emoji: "🚀",
+                title: "Deploy Started",
+                summary: "A new deployment is in progress.",
+                showLogsButton: true,
             }
-            case "deploy_ended": {
-                const service = await fetchServiceInfo(payload)
-                const {color, titleSuffix, description} = describeDeployEnded(payload)
-                console.log(`sending discord message for ${service.name} (deploy_ended:${payload.data.status})`)
-                await sendNotification({
-                    name: service.name,
-                    dashboardUrl: service.dashboardUrl,
-                    color,
-                    titleSuffix,
-                    description,
-                    showLogsButton: true,
-                })
-                return
+        case "deploy_ended":
+            switch (payload.data.status) {
+                case "succeeded":
+                    return {
+                        color: COLOR_GREEN,
+                        emoji: "✅",
+                        title: "Deploy Succeeded",
+                        summary: "The latest version is now live.",
+                        showLogsButton: true,
+                    }
+                case "failed":
+                    return {
+                        color: COLOR_RED,
+                        emoji: "❌",
+                        title: "Deploy Failed",
+                        summary: "Deployment did not complete.",
+                        showLogsButton: true,
+                    }
+                case "canceled":
+                    return {
+                        color: COLOR_YELLOW,
+                        emoji: "⏹️",
+                        title: "Deploy Canceled",
+                        summary: "Deployment was canceled.",
+                        showLogsButton: true,
+                    }
+                default:
+                    return {
+                        color: COLOR_YELLOW,
+                        emoji: "🚀",
+                        title: "Deploy Ended",
+                        summary: `Deployment ended with status: ${payload.data.status ?? "unknown"}.`,
+                        showLogsButton: true,
+                    }
             }
-            case "maintenance_started": {
-                const service = await fetchServiceInfo(payload)
-                console.log(`sending discord message for ${service.name} (maintenance_started)`)
-                await sendNotification({
-                    name: service.name,
-                    dashboardUrl: service.dashboardUrl,
-                    color: COLOR_WARNING,
-                    titleSuffix: "Maintenance Started",
-                    description: "A platform maintenance window has started.",
-                })
-                return
+        case "maintenance_started":
+            return {
+                color: COLOR_YELLOW,
+                emoji: "🔧",
+                title: "Maintenance Started",
+                summary: "A platform maintenance window has started.",
             }
-            case "maintenance_ended": {
-                const service = await fetchServiceInfo(payload)
-                console.log(`sending discord message for ${service.name} (maintenance_ended)`)
-                await sendNotification({
-                    name: service.name,
-                    dashboardUrl: service.dashboardUrl,
-                    color: COLOR_SUCCESS,
-                    titleSuffix: "Maintenance Ended",
-                    description: "The platform maintenance window has ended.",
-                })
-                return
+        case "maintenance_ended":
+            return {
+                color: COLOR_GREEN,
+                emoji: "✅",
+                title: "Maintenance Ended",
+                summary: "The platform maintenance window has ended.",
             }
-            case "service_suspended": {
-                const service = await fetchServiceInfo(payload)
-                console.log(`sending discord message for ${service.name} (service_suspended)`)
-                await sendNotification({
-                    name: service.name,
-                    dashboardUrl: service.dashboardUrl,
-                    color: COLOR_SUSPENDED,
-                    titleSuffix: "Suspended",
-                    description: "The service was suspended.",
-                })
-                return
+        case "service_suspended":
+            return {
+                color: COLOR_RED,
+                emoji: "⏸️",
+                title: "Service Suspended",
+                summary: "The service has been suspended.",
             }
-            case "server_failed": {
-                const service = await fetchServiceInfo(payload)
-                const event = await fetchEventInfo(payload)
-                console.log(`sending discord message for ${service.name} (server_failed)`)
-                await sendServerFailedMessage(service, event.details?.reason ?? {})
-                return
+        case "server_failed":
+            return {
+                color: COLOR_RED,
+                emoji: "❌",
+                title: "Server Failed",
+                summary: "The service is no longer running.",
+                showLogsButton: true,
             }
-            case "postgres_backup_completed": {
-                const postgres = await fetchPostgresInfo(payload)
-                console.log(`sending discord message for ${postgres.name} (postgres_backup_completed)`)
-                await sendNotification({
-                    name: postgres.name,
-                    dashboardUrl: postgres.dashboardUrl,
-                    color: COLOR_SUCCESS,
-                    titleSuffix: "Backup Completed",
-                    description: "Postgres backup completed successfully.",
-                })
-                return
+        case "postgres_backup_completed":
+            return {
+                color: COLOR_GREEN,
+                emoji: "✅",
+                title: "Backup Completed",
+                summary: "Postgres backup completed successfully.",
             }
-            case "postgres_backup_failed": {
-                const postgres = await fetchPostgresInfo(payload)
-                console.log(`sending discord message for ${postgres.name} (postgres_backup_failed)`)
-                await sendNotification({
-                    name: postgres.name,
-                    dashboardUrl: postgres.dashboardUrl,
-                    color: COLOR_FAILURE,
-                    titleSuffix: "Backup Failed",
-                    description: "Postgres backup failed.",
-                })
-                return
+        case "postgres_backup_failed":
+            return {
+                color: COLOR_RED,
+                emoji: "❌",
+                title: "Backup Failed",
+                summary: "Postgres backup did not complete.",
             }
-            case "postgres_unavailable": {
-                const postgres = await fetchPostgresInfo(payload)
-                console.log(`sending discord message for ${postgres.name} (postgres_unavailable)`)
-                await sendNotification({
-                    name: postgres.name,
-                    dashboardUrl: postgres.dashboardUrl,
-                    color: COLOR_FAILURE,
-                    titleSuffix: "Unavailable",
-                    description: "Postgres database is currently unavailable.",
-                })
-                return
+        case "postgres_unavailable":
+            return {
+                color: COLOR_RED,
+                emoji: "⚠️",
+                title: "Postgres Unavailable",
+                summary: "The Postgres database is currently unavailable.",
             }
-            default:
-                console.log(`unhandled webhook type ${payload.type} for service ${payload.data.serviceId}`)
-        }
-    } catch (error) {
-        console.error(error)
+        default:
+            return null
     }
 }
 
-function describeDeployEnded(payload: WebhookPayload): {color: string; titleSuffix: string; description: string} {
-    switch (payload.data.status) {
-        case "succeeded":
-            return {color: COLOR_SUCCESS, titleSuffix: "Deploy Succeeded", description: "Deployment completed successfully."}
-        case "failed":
-            return {color: COLOR_FAILURE, titleSuffix: "Deploy Failed", description: "Deployment failed."}
-        case "canceled":
-            return {color: COLOR_NEUTRAL, titleSuffix: "Deploy Canceled", description: "Deployment was canceled."}
-        default:
-            return {color: COLOR_INFO, titleSuffix: "Deploy Ended", description: `Deployment ended with status: ${payload.data.status ?? "unknown"}.`}
+function describeFailureReason(failureReason: any): string {
+    if (!failureReason) return "Unknown reason"
+    if (failureReason.nonZeroExit) {
+        return `Exited with status ${failureReason.nonZeroExit}`
+    }
+    if (failureReason.oomKilled) {
+        return "Out of memory"
+    }
+    if (failureReason.timedOutSeconds) {
+        return `Timed out ${failureReason.timedOutReason ?? ""}`.trim()
+    }
+    if (failureReason.unhealthy) {
+        return failureReason.unhealthy
+    }
+    return "Unknown reason"
+}
+
+async function handleWebhook(payload: WebhookPayload) {
+    try {
+        const style = getEventStyle(payload)
+        if (!style) {
+            console.log(`unhandled webhook type ${payload.type} for service ${payload.data.serviceId}`)
+            return
+        }
+
+        const isPostgres = payload.type.startsWith("postgres_")
+        const resource = isPostgres
+            ? await fetchPostgresInfo(payload)
+            : await fetchServiceInfo(payload)
+
+        const fields: EmbedField[] = []
+        if (payload.type === "server_failed") {
+            const event = await fetchEventInfo(payload)
+            fields.push({name: "Reason", value: describeFailureReason(event.details?.reason)})
+        }
+
+        console.log(`sending discord message for ${resource.name} (${payload.type})`)
+        await sendNotification({
+            name: resource.name,
+            dashboardUrl: resource.dashboardUrl,
+            style,
+            fields,
+        })
+    } catch (error) {
+        console.error(error)
     }
 }
 
 async function sendNotification(opts: {
     name: string;
     dashboardUrl: string;
-    color: string;
-    titleSuffix: string;
-    description: string;
-    showLogsButton?: boolean;
+    style: EventStyle;
+    fields: EmbedField[];
 }) {
     const channel = await client.channels.fetch(discordChannelID);
     if (!channel) {
@@ -249,45 +272,35 @@ async function sendNotification(opts: {
     }
 
     const embed = new EmbedBuilder()
-        .setColor(opts.color as ColorResolvable)
-        .setTitle(`${opts.name} ${opts.titleSuffix}`)
-        .setDescription(opts.description)
+        .setColor(opts.style.color as ColorResolvable)
+        .setAuthor({name: "Render"})
+        .setTitle(`${opts.style.emoji}  ${opts.style.title}`)
         .setURL(opts.dashboardUrl)
+        .setDescription(`**${opts.name}**\n${opts.style.summary}`)
+        .setFooter({text: "Render Webhook"})
+        .setTimestamp(new Date())
 
-    const components: ActionRowBuilder<MessageActionRowComponentBuilder>[] = []
-    if (opts.showLogsButton) {
-        const logs = new ButtonBuilder()
-            .setLabel("View Logs")
-            .setURL(`${opts.dashboardUrl}/logs`)
-            .setStyle(ButtonStyle.Link);
-        const row = new ActionRowBuilder<MessageActionRowComponentBuilder>()
-            .addComponents(logs);
-        components.push(row)
+    if (opts.fields.length > 0) {
+        embed.addFields(opts.fields)
     }
 
-    await channel.send({embeds: [embed], components})
-}
-
-async function sendServerFailedMessage(service: RenderService, failureReason: any) {
-    let description = "Failed for unknown reason"
-    if (failureReason.nonZeroExit) {
-        description = `Exited with status ${failureReason.nonZeroExit}`
-    } else if (failureReason.oomKilled) {
-        description = `Out of Memory`
-    } else if (failureReason.timedOutSeconds) {
-        description = `Timed out ` + failureReason.timedOutReason
-    } else if (failureReason.unhealthy) {
-        description = failureReason.unhealthy
+    const buttons: ButtonBuilder[] = [
+        new ButtonBuilder()
+            .setLabel("Open Dashboard")
+            .setURL(opts.dashboardUrl)
+            .setStyle(ButtonStyle.Link),
+    ]
+    if (opts.style.showLogsButton) {
+        buttons.push(
+            new ButtonBuilder()
+                .setLabel("View Logs")
+                .setURL(`${opts.dashboardUrl}/logs`)
+                .setStyle(ButtonStyle.Link),
+        )
     }
+    const row = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(buttons)
 
-    await sendNotification({
-        name: service.name,
-        dashboardUrl: service.dashboardUrl,
-        color: COLOR_FAILURE,
-        titleSuffix: "Failed",
-        description,
-        showLogsButton: true,
-    })
+    await channel.send({embeds: [embed], components: [row]})
 }
 
 // fetchEventInfo fetches the event that triggered the webhook
