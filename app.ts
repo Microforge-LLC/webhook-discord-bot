@@ -1,6 +1,8 @@
 import express, {NextFunction, Request, Response} from "express";
 import {Webhook, WebhookUnbrandedRequiredHeaders, WebhookVerificationError} from "standardwebhooks"
 import {RenderEvent, RenderPostgres, RenderService, WebhookPayload} from "./render";
+import {VercelDeploymentMessage, VercelWebhookPayload, buildVercelDeploymentMessage} from "./vercel";
+import {VercelWebhookVerificationError, parseVerifiedVercelWebhook} from "./vercelWebhook";
 import {
     ActionRowBuilder,
     ButtonBuilder,
@@ -20,6 +22,7 @@ if (!renderWebhookSecret ) {
     console.error("Error: RENDER_WEBHOOK_SECRET is not set.");
     process.exit(1);
 }
+const vercelWebhookSecret = process.env.VERCEL_WEBHOOK_SECRET || '';
 
 
 const renderAPIURL = process.env.RENDER_API_URL || "https://api.render.com/v1"
@@ -72,9 +75,22 @@ app.post("/webhook", express.raw({type: 'application/json'}), (req: Request, res
     handleWebhook(payload)
 });
 
+app.post("/webhook/vercel", express.raw({type: 'application/json'}), (req: Request, res: Response, next: NextFunction) => {
+    let payload: VercelWebhookPayload
+    try {
+        payload = parseVerifiedVercelWebhook(req.body, req.header("x-vercel-signature") || "", vercelWebhookSecret)
+    } catch (error) {
+        return next(error)
+    }
+
+    res.status(200).send({}).end()
+
+    handleVercelWebhook(payload)
+});
+
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     console.error(err);
-    if (err instanceof WebhookVerificationError) {
+    if (err instanceof WebhookVerificationError || err instanceof VercelWebhookVerificationError) {
         res.status(400).send({}).end()
     } else {
         res.status(500).send({}).end()
@@ -256,12 +272,22 @@ async function handleWebhook(payload: WebhookPayload) {
     }
 }
 
-async function sendNotification(opts: {
-    name: string;
-    dashboardUrl: string;
-    style: EventStyle;
-    fields: EmbedField[];
-}) {
+async function handleVercelWebhook(payload: VercelWebhookPayload) {
+    try {
+        const message = buildVercelDeploymentMessage(payload)
+        if (!message) {
+            console.log(`unhandled vercel webhook type ${payload.type}`)
+            return
+        }
+
+        console.log(`sending vercel discord message for ${payload.payload.project?.name ?? payload.payload.deployment?.name ?? "unknown project"} (${payload.type})`)
+        await sendVercelNotification(message)
+    } catch (error) {
+        console.error(error)
+    }
+}
+
+async function fetchDiscordChannel() {
     const channel = await client.channels.fetch(discordChannelID);
     if (!channel) {
         throw new Error(`unable to find specified Discord channel ${discordChannelID}`);
@@ -270,6 +296,17 @@ async function sendNotification(opts: {
     if (!channel.isSendable()) {
         throw new Error(`specified Discord channel ${discordChannelID} is not sendable`);
     }
+
+    return channel;
+}
+
+async function sendNotification(opts: {
+    name: string;
+    dashboardUrl: string;
+    style: EventStyle;
+    fields: EmbedField[];
+}) {
+    const channel = await fetchDiscordChannel();
 
     const embed = new EmbedBuilder()
         .setColor(opts.style.color as ColorResolvable)
@@ -301,6 +338,41 @@ async function sendNotification(opts: {
     const row = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(buttons)
 
     await channel.send({embeds: [embed], components: [row]})
+}
+
+async function sendVercelNotification(message: VercelDeploymentMessage) {
+    const channel = await fetchDiscordChannel();
+
+    const embed = new EmbedBuilder()
+        .setColor(message.color as ColorResolvable)
+        .setAuthor({name: message.authorName})
+        .setTitle(message.title)
+        .setDescription(message.description)
+        .setFooter({text: message.footerText})
+        .setTimestamp(new Date())
+
+    if (message.url) {
+        embed.setURL(message.url)
+    }
+
+    if (message.fields.length > 0) {
+        embed.addFields(message.fields)
+    }
+
+    const buttons = message.buttons.map(button =>
+        new ButtonBuilder()
+            .setLabel(button.label)
+            .setURL(button.url)
+            .setStyle(ButtonStyle.Link),
+    )
+
+    if (buttons.length > 0) {
+        const row = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(buttons)
+        await channel.send({embeds: [embed], components: [row]})
+        return
+    }
+
+    await channel.send({embeds: [embed]})
 }
 
 // fetchEventInfo fetches the event that triggered the webhook

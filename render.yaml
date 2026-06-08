@@ -8,6 +8,8 @@ services:
   envVars:
   - key: RENDER_WEBHOOK_SECRET
     sync: false
+  - key: VERCEL_WEBHOOK_SECRET
+    sync: false
   - key: RENDER_API_KEY
     sync: false
   - key: DISCORD_TOKEN
