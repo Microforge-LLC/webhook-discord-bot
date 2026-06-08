@@ -1,7 +1,7 @@
 {
   "name": "webhook-discord-bot",
   "version": "1.0.0",
-  "description": "Render Webhook Receiver Example",
+  "description": "Render and Vercel Webhook Discord Bot",
   "main": "app.ts",
   "repository": "https://github.com/render-examples/webhook-discord-bot",
   "author": "Render Developers",
@@ -11,6 +11,7 @@
     "build": "pnpm exec tsc",
     "start": "node dist/app.js",
     "dev": "tsnd --respawn app.ts",
+    "test": "rm -rf .test-dist && tsc --outDir .test-dist && node --test \".test-dist/**/*.test.js\"",
     "typecheck": "tsc --noEmit --pretty"
   },
   "keywords": [],
